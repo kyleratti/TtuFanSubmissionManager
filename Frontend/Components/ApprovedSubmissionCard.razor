@@ -1,0 +1,132 @@
+﻿@using Frontend.Util
+@using System.Timers
+@using AdminData.Hubs
+@using CommonCore.Base.Structures
+@using Core.Interfaces
+@using Microsoft.AspNetCore.SignalR
+
+@inject ISubmissionQueue _submissionQueue
+@inject IHubContext<SubmissionHub, ISubmissionHub> _submissionHub
+@inject NavigationManager _navManager
+
+<div class="card m-2" style="width: 250px">
+    <img
+        src=@_navManager.ToAbsoluteUri($"api/Submission/Image/{SubmissionId}")
+        class="card-img-top submission-image"
+        alt="Submission @SubmissionId"
+        @onmouseover="OnMouseOver"
+        @onmousemove="OnMouseMove"
+        @onmouseout="OnMouseOut"
+    />
+    <SubmissionHoverPreview
+        SubmissionId="@SubmissionId"
+        Visible="@_hoverPreviewEnabled"
+        CurrentMousePos="_hoverPreviewMousePos"
+        Width="600"
+        Height="425"
+    />
+    <div class="card-body text-center">
+        <div class="input-group d-flex">
+            <button type="button" class="btn btn-outline-danger flex-grow-1" @onclick="DiscardSubmissionAsync">
+                Discard
+            </button>
+            <button type="button" class="btn btn-outline-danger dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            <ul class="dropdown-menu">
+                <li>
+                    <a class="dropdown-item text-danger" href="#" @onclick="ShowBlockNumberModal" @onclick:preventDefault="true">
+                        <i class="bi bi-person-x"></i> Block Phone Number
+                    </a>
+                </li>
+            </ul>
+        </div>
+        <!--<button class="btn btn-success w-100">Approve</button>
+        <button class="btn btn-sm btn-outline-dark m-1">Discard</button>
+        <button class="btn btn-sm btn-outline-danger m-1">Block</button>-->
+    </div>
+    <div class="card-footer text-muted fs-6 h-25">
+        <ul class="list-unstyled">
+            <li>📞 @PhoneNumber</li>
+            <li>📸 @DateFormatting.FormatAsTimeAgo(SubmittedAt)</li>
+            @if (LastSubmissionAt.Try(out var lastSubmission))
+            {
+                <li>📅 @DateFormatting.FormatAsTimeAgo(lastSubmission)</li>
+            }
+            else
+            {
+                <li title="This is the first time this phone number has submitted an image.">✅ First Submission</li>
+            }
+        </ul>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public IModalService Modal { get; set; } = null!;
+
+    [Parameter] public int SubmissionId { get; set; }
+    [Parameter] public string PhoneNumber { get; set; } = null!;
+    [Parameter] public DateTime SubmittedAt { get; set; }
+    [Parameter] public Maybe<DateTime> LastSubmissionAt { get; set; }
+
+    private Timer _hoverPreviewTimer = null!;
+    private (double X, double Y) _hoverPreviewMousePos;
+    private bool _hoverPreviewEnabled = false;
+
+    /// <inheritdoc />
+    protected override void OnInitialized()
+    {
+        _hoverPreviewTimer = new Timer(300);
+        _hoverPreviewTimer.Elapsed += OnHoverPreviewTimerElapsed;
+        _hoverPreviewTimer.AutoReset = false;
+    }
+
+    private async Task DiscardSubmissionAsync()
+    {
+        await _submissionQueue.DiscardSubmissionAsync(SubmissionId);
+        await _submissionHub.Clients.All.SendSubmissionDiscardedAsync(SubmissionId);
+    }
+
+    private void OnMouseOver(MouseEventArgs args)
+    {
+        _hoverPreviewTimer.Stop();
+        _hoverPreviewTimer.Start();
+        _hoverPreviewMousePos = (args.ScreenX, args.ScreenY);
+    }
+
+    private void OnMouseMove(MouseEventArgs args)
+    {
+        _hoverPreviewMousePos = (args.ScreenX, args.ScreenY);
+    }
+
+    private void OnMouseOut(MouseEventArgs args)
+    {
+        _hoverPreviewTimer.Stop();
+        SetHoverPreviewVisible(false);
+    }
+
+    private void OnHoverPreviewTimerElapsed(object? sender, ElapsedEventArgs args)
+    {
+        SetHoverPreviewVisible(true);
+    }
+
+    private void SetHoverPreviewVisible(bool shouldBeVisible)
+    {
+        _hoverPreviewEnabled = shouldBeVisible;
+        InvokeAsync(StateHasChanged); // Force the client to re-render
+    }
+
+    private void ShowBlockNumberModal()
+    {
+        var parameters = new ModalParameters();
+        parameters.Add(nameof(SubmissionId), SubmissionId);
+        parameters.Add(nameof(PhoneNumber), PhoneNumber);
+        var options = new ModalOptions
+        {
+            Class = "block-number-modal",
+            HideCloseButton = true
+        };
+
+        Modal.Show<BlockNumberModal>("Block Phone Number", parameters, options);
+    }
+}

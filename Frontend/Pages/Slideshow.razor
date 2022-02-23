@@ -1,0 +1,222 @@
+﻿@page "/Slideshow"
+
+@using Core.Interfaces
+@using Microsoft.AspNetCore.SignalR
+@using AdminData.Hubs
+@using Frontend.Util
+@using Microsoft.AspNetCore.SignalR.Client
+@using System.Timers
+@using CommonCore.Base.Extensions
+@using CommonCore.Base.Structures
+@using Frontend.Data
+
+@inject IJSRuntime _jsRuntime
+@inject ISubmissionQueue _submissionQueue
+@inject HubHelper _hubHelper;
+@inject IHubContext<SubmissionHub, ISubmissionHub> _submissionHub
+@inject NavigationManager _navManager
+@inject ClientSettingsProvider _clientSettingsProvider
+
+@implements IAsyncDisposable
+
+<div class="windowed-only">
+    <h3>Slideshow Mode</h3>
+
+    @if (!_isImageOrientationSupported)
+    {
+        <ImageOrientationWarning Visible="@(!_isImageOrientationSupported)"/>
+    }
+
+    <div class="alert alert-info">
+        Tip: Press <code>F11</code> to enter fullscreen mode and activate the full slideshow.
+    </div>
+
+    <SlideshowSettings />
+
+    @if (_approvedSubmissionList.Any())
+    {
+        <div class="container d-flex flex-wrap p-2 slideshow-preview" style="--slideshow-interval: @(_timer.Interval)ms">
+            @foreach (var submission in _approvedSubmissionList.ToArray().OrderBy(x => x.ApprovedAt))
+            {
+                <div class="slideshow-item p-1 @(_currentSlideshowItem.HasValue && _currentSlideshowItem.Value.Value.Equals(submission) ? "slideshow-item-active bg-primary" : "")">
+                    <ApprovedSubmissionCard
+                        SubmissionId="@submission.SubmissionId"
+                        PhoneNumber="@submission.PhoneNumber"
+                        LastSubmissionAt="@submission.LastSubmissionAt.ToMaybe()"
+                        SubmittedAt="@submission.SubmittedAt"
+                    />
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-warning">
+            There are currently no approved images. The slideshow will be blank if started.
+        </div>
+    }
+</div>
+
+<div class="fullscreen-only" @onfullscreenmodechange="HandleFullScreenModeChange">
+    @if (_currentSlideshowItem.Try(out var currentItem))
+    {
+        <img
+            class="slideshow-image"
+            src=@_navManager.ToAbsoluteUri($"api/Submission/Image/{currentItem.Value.SubmissionId}")
+            alt=@($"Submission #{currentItem.Value.SubmissionId}")
+        />
+    }
+</div>
+
+@code {
+    private readonly LinkedList<ApprovedSubmission> _approvedSubmissionList = new();
+    private readonly Timer _timer = new();
+
+    private Maybe<LinkedListNode<ApprovedSubmission>> _currentSlideshowItem = Maybe<LinkedListNode<ApprovedSubmission>>.Empty();
+    private HubConnection? _hubConnection;
+    private bool _isImageOrientationSupported = true;
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        var approvedSubmissions = await _submissionQueue.GetAllApprovedSubmissionsAsync();
+
+        foreach (var submission in approvedSubmissions.OrderBy(x => x.ApprovedAt))
+            _approvedSubmissionList.AddLast(submission);
+
+        _currentSlideshowItem = Maybe<LinkedListNode<ApprovedSubmission>>.Create(_approvedSubmissionList.First!, hasValue: _approvedSubmissionList.First is not null);
+
+        await InitializeSubmissionHubAsync();
+
+        _timer.Elapsed += OnTimerElapsed;
+        _timer.AutoReset = true;
+
+        _clientSettingsProvider.OnSlideshowIntervalSettingChanged += args =>
+        {
+            _timer.Interval = args.NewInterval.TotalMilliseconds;
+            InvokeAsync(StateHasChanged);
+        };
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _isImageOrientationSupported = await _jsRuntime.InvokeAsync<bool>("isImageOrientationSupported");
+            await GetOrSetSlideshowIntervalAsync(TimeSpan.FromSeconds(5));
+
+            _timer.Start();
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void OnTimerElapsed(object? sender, ElapsedEventArgs _)
+    {
+        InvokeAsync(SelectNextSlideshowItemAsync);
+    }
+
+    private async Task SelectNextSlideshowItemAsync()
+    {
+        if (_currentSlideshowItem.Try(out var maybeNext) && maybeNext.Next is {} nextItem)
+            _currentSlideshowItem = nextItem;
+        else if (_currentSlideshowItem.Try(out var maybeFirst) && maybeFirst.Next is null && _approvedSubmissionList.First is {} firstItem)
+            _currentSlideshowItem = firstItem;
+        else
+            _currentSlideshowItem = Maybe<LinkedListNode<ApprovedSubmission>>.Empty();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task GetOrSetSlideshowIntervalAsync(TimeSpan span)
+    {
+        var existingInterval = await _clientSettingsProvider.GetSlideshowIntervalAsync();
+
+        if (existingInterval?.TotalMilliseconds > 500)
+            _timer.Interval = existingInterval.Value.TotalMilliseconds;
+        else
+        {
+            await _clientSettingsProvider.SetSlideshowIntervalAsync(span);
+            _timer.Interval = span.TotalMilliseconds;
+        }
+    }
+
+    private void HandleFullScreenModeChange(FullScreenModeChangeArgs args)
+    {
+        Console.WriteLine(args);
+    }
+
+    private void AddHubSubscriptions()
+    {
+        OnSubmissionApproved += args =>
+        {
+            if (_approvedSubmissionList.Contains(args.Submission))
+                return;
+
+            _approvedSubmissionList.AddLast(args.Submission);
+            InvokeAsync(StateHasChanged);
+        };
+
+        OnSubmissionDiscarded += async args =>
+        {
+            if (_approvedSubmissionList.FirstOrDefault(x => x.SubmissionId == args.SubmissionId) is not { } submission)
+                return;
+
+            if (_currentSlideshowItem.Try(out var item) && item.Value.Equals(submission))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await SelectNextSlideshowItemAsync();
+                    _approvedSubmissionList.Remove(submission);
+                    StateHasChanged();
+                });
+            }
+            else
+            {
+                await InvokeAsync(() =>
+                {
+                    _approvedSubmissionList.Remove(submission);
+                    StateHasChanged();
+                });
+            }
+
+            _approvedSubmissionList.Remove(submission);
+        };
+    }
+
+    private delegate void SubmissionApprovedEventHandler(SubmissionApprovedEventArgs args);
+    private delegate void SubmissionDiscardedEventHandler(SubmissionDiscardedEventArgs args);
+
+    private event SubmissionApprovedEventHandler? OnSubmissionApproved;
+    private event SubmissionDiscardedEventHandler? OnSubmissionDiscarded;
+
+    private record SubmissionApprovedEventArgs(ApprovedSubmission Submission);
+    private record SubmissionDiscardedEventArgs(int SubmissionId);
+
+    private async Task InitializeSubmissionHubAsync()
+    {
+        _hubConnection = _hubHelper.SubmissionHub;
+
+        _hubConnection.On<ApprovedSubmission>(nameof(ISubmissionHub.SendSubmissionApprovedAsync), submission =>
+        {
+            OnSubmissionApproved?.Invoke(new SubmissionApprovedEventArgs(submission));
+        });
+
+        _hubConnection.On<int>(nameof(ISubmissionHub.SendSubmissionDiscardedAsync), submissionId =>
+        {
+            OnSubmissionDiscarded?.Invoke(new SubmissionDiscardedEventArgs(submissionId));
+        });
+
+        await _hubConnection.StartAsync();
+
+        AddHubSubscriptions();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+            await _hubConnection.DisposeAsync();
+    }
+}

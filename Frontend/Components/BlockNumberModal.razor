@@ -1,0 +1,37 @@
+﻿@inject IModalService _modalService
+
+<p>Are you sure you want to block <b>@PhoneNumber</b>?</p>
+
+<p>This will immediately remove all approved and pending images from this phone number. If this phone number submits any new images, they will be automatically removed.</p>
+
+<p class="text-danger">This action cannot be undone.</p>
+
+<button class="btn btn-danger" @onclick="BlockNumberAsync">Block Phone Number</button>
+<button class="btn" @onclick="Cancel" @ref="_cancelButtonRef">Cancel</button>
+
+@code {
+
+    [CascadingParameter] public BlazoredModalInstance ModalInstance { get; set; } = null!;
+
+    [Parameter] public int SubmissionId { get; set; }
+    [Parameter] public string PhoneNumber { get; set; } = null!;
+
+    private ElementReference _cancelButtonRef;
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await _cancelButtonRef.FocusAsync();
+    }
+
+    private Task BlockNumberAsync()
+    {
+        throw new NotImplementedException();
+    }
+
+    private void Cancel()
+    {
+        ModalInstance.CloseAsync(ModalResult.Cancel());
+    }
+}

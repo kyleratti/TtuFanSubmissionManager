@@ -1,0 +1,109 @@
+﻿@page "/Submissions/Pending"
+
+@using Core.Interfaces
+@using Microsoft.AspNetCore.SignalR.Client
+@using AdminData.Hubs
+@using CommonCore.Base.Extensions
+@using Microsoft.AspNetCore.SignalR
+
+@inject ISubmissionQueue _submissionQueue
+@inject NavigationManager _navManager
+@inject HubHelper _hubHelper;
+@inject IHubContext<SubmissionHub, ISubmissionHub> _submissionHub
+
+@implements IAsyncDisposable
+
+<PageTitle>Pending Submissions</PageTitle>
+<h3>Pending Submissions</h3>
+
+<p>These are all of the images currently in the queue. These images have not been approved yet.</p>
+
+<div class="container d-flex flex-wrap p-2">
+    @foreach (var (submissionId, submission) in _pendingSubmissions.OrderBy(x => x.Value.SubmittedAt))
+    {
+        <PendingSubmissionCard
+            SubmissionId="@submissionId"
+            PhoneNumber="@submission.PhoneNumber"
+            LastSubmissionAt="@submission.LastSubmissionAt.ToMaybe()"
+            SubmittedAt="@submission.SubmittedAt"
+        />
+    }
+</div>
+
+@code {
+    private HubConnection? _hubConnection;
+    private IDictionary<int, PendingSubmission> _pendingSubmissions = new Dictionary<int, PendingSubmission>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await InitializeSubmissionHubAsync();
+        _pendingSubmissions = (await _submissionQueue.GetAllPendingSubmissionsAsync())
+            .ToDictionary(x => x.SubmissionId, x => x);
+    }
+
+    private delegate void SubmissionApprovedEventHandler(SubmissionApprovedEventArgs args);
+    private delegate void SubmissionDiscardedEventHandler(SubmissionDiscardedEventArgs args);
+    private delegate void OnNewSubmissionsEventHandler(NewSubmissionsEventArgs args);
+
+    private event SubmissionApprovedEventHandler? OnSubmissionApproved;
+    private event SubmissionDiscardedEventHandler? OnSubmissionDiscarded;
+    private event OnNewSubmissionsEventHandler? OnNewSubmissions;
+
+    private record SubmissionApprovedEventArgs(ApprovedSubmission Submission);
+    private record SubmissionDiscardedEventArgs(int SubmissionId);
+    private record NewSubmissionsEventArgs(IReadOnlyCollection<PendingSubmission> Submissions);
+
+    private async Task InitializeSubmissionHubAsync()
+    {
+        _hubConnection = _hubHelper.SubmissionHub;
+
+        _hubConnection.On<ApprovedSubmission>(nameof(ISubmissionHub.SendSubmissionApprovedAsync), submission =>
+        {
+            OnSubmissionApproved?.Invoke(new SubmissionApprovedEventArgs(submission));
+        });
+
+        _hubConnection.On<int>(nameof(ISubmissionHub.SendSubmissionDiscardedAsync), submissionId =>
+        {
+            OnSubmissionDiscarded?.Invoke(new SubmissionDiscardedEventArgs(submissionId));
+        });
+
+        _hubConnection.On<IReadOnlyCollection<PendingSubmission>>(nameof(ISubmissionHub.SendNewSubmissionsAsync), submissions =>
+        {
+            OnNewSubmissions?.Invoke(new NewSubmissionsEventArgs(submissions));
+        });
+
+        await _hubConnection.StartAsync();
+
+        AddHubSubscriptions();
+    }
+
+    private void AddHubSubscriptions()
+    {
+        OnSubmissionApproved += args =>
+        {
+            _pendingSubmissions.Remove(args.Submission.SubmissionId);
+            InvokeAsync(StateHasChanged);
+        };
+
+        OnSubmissionDiscarded += args =>
+        {
+            _pendingSubmissions.Remove(args.SubmissionId);
+            InvokeAsync(StateHasChanged);
+        };
+
+        OnNewSubmissions += args =>
+        {
+            foreach (var submission in args.Submissions)
+                _pendingSubmissions[submission.SubmissionId] = submission;
+
+            InvokeAsync(StateHasChanged);
+        };
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+            await _hubConnection.DisposeAsync();
+    }
+}

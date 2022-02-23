@@ -1,0 +1,60 @@
+﻿@page "/"
+@using AdminData.Services
+
+@inject TwilioService _twilioService
+@inject MetadataCache _metadataCache
+
+<PageTitle>Home</PageTitle>
+
+<h1>TTU Fan Submission Manager</h1>
+
+<div class="alert alert-primary">
+    Submission Phone Number:
+    @if (SubmissionPhoneNumber is null)
+    {
+        <span class="placeholder-wave">
+            <span class="placeholder col-1"></span>
+        </span>
+    }
+    else
+    {
+        <b><a href="tel:@SubmissionPhoneNumber">@SubmissionPhoneNumber</a></b>
+    }
+</div>
+
+<p>This web application allows fans to text pictures of themselves at sporting events to a phone number for the chance for their submission to be displayed on screen.</p>
+
+<p>Submitted pictures are automatically placed into the <b>Pending Submissions</b> queue. The submission must be reviewed by event faculty before it is entered into the <b>Approved Submissions</b> list. Once an image has been approved, it will remain there until removed.</p>
+
+@code {
+    private string? SubmissionPhoneNumber { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadSubmissionPhoneNumberAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadSubmissionPhoneNumberAsync() =>
+        SubmissionPhoneNumber = await _metadataCache.GetOrCreateAsync(nameof(LoadSubmissionPhoneNumberAsync), async _ =>
+        {
+            var numbers = await _twilioService.GetAllIncomingPhoneNumbersAsync(limit: 2);
+
+            if (numbers.Count <= 0)
+                throw new ApplicationException("Failed to find phone numbers from Twilio");
+
+            if (numbers.Count > 1)
+                throw new ApplicationException("Found multiple phone numbers from Twilio");
+
+            var phoneNumber = numbers.First().PhoneNumber.ToString();
+
+            if (phoneNumber.Length != 12)
+                throw new ArgumentOutOfRangeException(nameof(phoneNumber), phoneNumber.Length, "Expected 12 digit phone number (including country code)");
+
+            return $"{phoneNumber[2..5]}-{phoneNumber[5..8]}-{phoneNumber[8..]}";
+        });
+}

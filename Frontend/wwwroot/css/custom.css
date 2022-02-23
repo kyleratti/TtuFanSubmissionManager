@@ -1,0 +1,67 @@
+.submission-image {
+    background-color: grey;
+    width: 100%;
+    height: 250px;
+    object-fit: cover;
+}
+
+.hover-preview {
+    position: fixed;
+    background-color: grey;
+    z-index: 100;
+    pointer-events: none; /* This prevents mouse events from firing */
+    outline: 2px dashed crimson;
+    max-width: 80vw;
+    max-height: 80vh;
+    overflow: hidden;
+}
+
+.hover-preview .submission-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.block-number-modal {
+    flex-direction: column;
+    z-index: 102;
+    background-color: #fff;
+    max-width: 450px;
+    padding: 1em;
+    border-radius: 2px;
+}
+
+.slideshow-preview {
+    --slideshow-interval: 5s;
+}
+
+.fullscreen-only {
+    display: none;
+}
+
+.windowed-only {
+    display: block;
+}
+
+@media all and (display-mode: fullscreen)
+{
+    .fullscreen-only {
+        display: block;
+    }
+
+    .windowed-only {
+        display: none;
+    }
+
+    * {
+        height: 100%;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    html,
+    body {
+        overflow-y: hidden;
+        cursor: none;
+    }
+}

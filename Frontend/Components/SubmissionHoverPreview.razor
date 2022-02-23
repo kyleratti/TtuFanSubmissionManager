@@ -1,0 +1,65 @@
+﻿@inject IJSRuntime _jsRuntime
+@inject NavigationManager _navManager
+
+<div
+    class="@(Visible ? "" : "d-none") hover-preview"
+    style="left: @LeftOffsetPx; top: @TopOffsetPx; width: @WidthPx; height: @HeightPx"
+>
+    <img
+        id="submission-image-preview-@(SubmissionId)"
+        style="width: @WidthPx; height: @HeightPx"
+        src=@_navManager.ToAbsoluteUri($"api/Submission/Image/{SubmissionId}")
+        class="submission-image"
+        alt="Full preview of submission @SubmissionId"
+    />
+</div>
+
+@code {
+    [Parameter] public int SubmissionId { get; set; }
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public (double X, double Y) CurrentMousePos { get; set; }
+    [Parameter] public int Width { get; set; }
+    [Parameter] public int Height { get; set; }
+
+    private Dimensions? _windowDimensions;
+    private Dimensions? _imageDimensions;
+
+    private string LeftOffsetPx
+    {
+        get
+        {
+            var imageEndX = CurrentMousePos.X + (_imageDimensions?.Width ?? 250);
+            if (imageEndX > (_windowDimensions?.Width ?? 250))
+                return $"{(_windowDimensions?.Width ?? 250) - (_imageDimensions?.Width ?? 250)}px";
+
+            return $"{CurrentMousePos.X - 40}px";
+        }
+    }
+
+    private string TopOffsetPx
+    {
+        get
+        {
+            var imageEndY = CurrentMousePos.Y + (_imageDimensions?.Height ?? 250);
+            if (imageEndY > (_windowDimensions?.Height ?? 250))
+                return $"{Math.Min(CurrentMousePos.Y, imageEndY - (_windowDimensions?.Height ?? 250))}px";
+
+            return $"{CurrentMousePos.Y - 40}px";
+        }
+    }
+
+    private string WidthPx => $"{_imageDimensions?.Width ?? 250}px";
+    private string HeightPx => $"{_imageDimensions?.Height ?? 250}px";
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _windowDimensions = await _jsRuntime.InvokeAsync<Dimensions>("getWindowDimensions");
+            _imageDimensions = await _jsRuntime.InvokeAsync<Dimensions?>("getImageDimensions", $"submission-image-preview-{SubmissionId}");
+        }
+    }
+
+    private record Dimensions(int Width, int Height);
+}

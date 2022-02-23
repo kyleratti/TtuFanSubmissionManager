@@ -1,0 +1,94 @@
+﻿@page "/Submissions/Approved"
+
+@using Core.Interfaces
+@using Microsoft.AspNetCore.SignalR
+@using AdminData.Hubs
+@using CommonCore.Base.Extensions
+@using Microsoft.AspNetCore.SignalR.Client
+
+@inject ISubmissionQueue _submissionQueue
+@inject NavigationManager _navManager
+@inject HubHelper _hubHelper;
+@inject IHubContext<SubmissionHub, ISubmissionHub> _submissionHub
+
+@implements IAsyncDisposable
+
+<PageTitle>Approved Submissions</PageTitle>
+<h3>Approved Submissions</h3>
+
+<p>These are all of the images currently <span class="text-success">approved</span>.</p>
+
+<div class="container d-flex flex-wrap p-2">
+    @foreach (var (submissionId, submission) in _approvedSubmissions.OrderBy(x => x.Value.ApprovedAt))
+    {
+        <ApprovedSubmissionCard
+            SubmissionId="@submissionId"
+            PhoneNumber="@submission.PhoneNumber"
+            LastSubmissionAt="@submission.LastSubmissionAt.ToMaybe()"
+            SubmittedAt="@submission.SubmittedAt"
+        />
+    }
+</div>
+
+@code {
+    private HubConnection? _hubConnection;
+    private IDictionary<int, ApprovedSubmission> _approvedSubmissions = new Dictionary<int, ApprovedSubmission>();
+
+    /// <inheritdoc />
+    protected override async Task OnInitializedAsync()
+    {
+        await InitializeSubmissionHubAsync();
+        _approvedSubmissions = (await _submissionQueue.GetAllApprovedSubmissionsAsync())
+            .ToDictionary(x => x.SubmissionId, x => x);
+    }
+
+    private void AddHubSubscriptions()
+    {
+        OnSubmissionApproved += args =>
+        {
+            _approvedSubmissions[args.Submission.SubmissionId] = args.Submission;
+            InvokeAsync(StateHasChanged);
+        };
+
+        OnSubmissionDiscarded += args =>
+        {
+            _approvedSubmissions.Remove(args.SubmissionId);
+            InvokeAsync(StateHasChanged);
+        };
+    }
+
+    private delegate void SubmissionApprovedEventHandler(SubmissionApprovedEventArgs args);
+    private delegate void SubmissionDiscardedEventHandler(SubmissionDiscardedEventArgs args);
+
+    private event SubmissionApprovedEventHandler? OnSubmissionApproved;
+    private event SubmissionDiscardedEventHandler? OnSubmissionDiscarded;
+
+    private record SubmissionApprovedEventArgs(ApprovedSubmission Submission);
+    private record SubmissionDiscardedEventArgs(int SubmissionId);
+
+    private async Task InitializeSubmissionHubAsync()
+    {
+        _hubConnection = _hubHelper.SubmissionHub;
+
+        _hubConnection.On<ApprovedSubmission>(nameof(ISubmissionHub.SendSubmissionApprovedAsync), submission =>
+        {
+            OnSubmissionApproved?.Invoke(new SubmissionApprovedEventArgs(submission));
+        });
+
+        _hubConnection.On<int>(nameof(ISubmissionHub.SendSubmissionDiscardedAsync), submissionId =>
+        {
+            OnSubmissionDiscarded?.Invoke(new SubmissionDiscardedEventArgs(submissionId));
+        });
+
+        await _hubConnection.StartAsync();
+
+        AddHubSubscriptions();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+            await _hubConnection.DisposeAsync();
+    }
+}
