@@ -1,0 +1,22 @@
+# Credit: @JakeThurman (https://github.com/JakeThurman)
+
+name: Block fixups
+on: pull_request
+
+jobs:
+  block-fixup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Check for fixups
+        run: |
+          set -eo pipefail
+          FIXUP_COUNT=$(git log --pretty=format:%s origin/${{ github.base_ref }}..HEAD | grep fixup | wc -l || true)
+          echo "Fixup! commits: $FIXUP_COUNT (in origin/${{ github.base_ref }})..HEAD"
+          if [[ "$FIXUP_COUNT" -gt "0" ]]; then
+            echo "Failure..."
+            exit 1
+          fi
