@@ -1,0 +1,64 @@
+# curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+#           sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu  $(lsb_release -cs)  stable"
+#           sudo apt-get update
+#           sudo apt-get install docker-ce -y
+
+name: CI/CD
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v2
+      - name: Set up .NET 6
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: "6.0.x"
+      - name: Build
+        run: dotnet build
+      - name: Run tests
+        run: dotnet test
+      - name: Test building container
+        run: docker-compose build
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    steps:
+      - uses: actions/checkout@v2
+      - name: Clean server build dir
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
+          port: ${{ secrets.PORT }}
+          script: |
+            cd ${{ secrets.BUILD_DIR }}
+            rm -rf ${{ secrets.BUILD_DIR }}
+      - name: Copy to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
+          port: ${{ secrets.PORT }}
+          source: "./*"
+          target: "${{ secrets.BUILD_DIR }}"
+      - name: Build and deploy container
+        uses: appleboy/ssh-action@master
+        with:
+          debug: false
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
+          port: ${{ secrets.PORT }}
+          command_timeout: 20m # .NET 6 projects were failing at 10m (default)
+          # NOTE: If you don't _also_ export the variable in the script, docker won't be able to see it!
+          script: |
+            cd ${{ secrets.BUILD_DIR }}
+            docker-compose build
+            docker-compose down
+            docker-compose up -d
+            docker image prune -f
