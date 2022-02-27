@@ -48,8 +48,16 @@ jobs:
           target: "${{ secrets.BUILD_DIR }}"
       - name: Build and deploy container
         uses: appleboy/ssh-action@master
+        env:
+          DbSettings__HostName: ${{ secrets.DbSettings__HostName }}
+          DbSettings__DatabaseName: ${{ secrets.DbSettings__DatabaseName }}
+          DbSettings__Username: ${{ secrets.DbSettings__Username }}
+          DbSettings__Password: ${{ secrets.DbSettings__Password }}
+          TwilioSettings__AccountSid: ${{ secrets.TwilioSettings__AccountSid }}
+          TwilioSettings__AuthToken: ${{ secrets.TwilioSettings__AuthToken }}
         with:
           debug: false
+          envs: DbSettings__HostName, DbSettings__DatabaseName, DbSettings__Username, DbSettings__Password, TwilioSettings__AccountSid, TwilioSettings__AuthToken
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.KEY }}
@@ -57,6 +65,12 @@ jobs:
           command_timeout: 20m # .NET 6 projects were failing at 10m (default)
           # NOTE: If you don't _also_ export the variable in the script, docker won't be able to see it!
           script: |
+            export DbSettings__HostName=${{ secrets.DbSettings__HostName }}
+            export DbSettings__DatabaseName=${{ secrets.DbSettings__DatabaseName }}
+            export DbSettings__Username=${{ secrets.DbSettings__Username }}
+            export DbSettings__Password=${{ secrets.DbSettings__Password }}
+            export TwilioSettings__AccountSid=${{ secrets.TwilioSettings__AccountSid }}
+            export TwilioSettings__AuthToken=${{ secrets.TwilioSettings__AuthToken }}
             cd ${{ secrets.BUILD_DIR }}
             docker-compose build
             docker-compose down

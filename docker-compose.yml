@@ -1,0 +1,17 @@
+version: "3.4"
+
+services:
+  TtuFanSubmissionManager:
+    image: ${DOCKER_REGISTRY-}ttufansubmissionmanager
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: host
+    environment:
+      - DbSettings__HostName
+      - DbSettings__DatabaseName
+      - DbSettings__Username
+      - DbSettings__Password
+      - TwilioSettings__AccountSid
+      - TwilioSettings__AuthToken
+    restart: unless-stopped
